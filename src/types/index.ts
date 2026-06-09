@@ -293,3 +293,9 @@ export interface CanvasSectionsOptions {
   json?: boolean;
   workspace?: string;
 }
+
+export interface CanvasDeleteOptions {
+  yes?: boolean;
+  json?: boolean;
+  workspace?: string;
+}

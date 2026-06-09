@@ -488,6 +488,11 @@ export class SlackClient {
     return this.request('canvases.create', params);
   }
 
+  // Permanently delete a canvas. Irreversible — there is no way to recover it.
+  async deleteCanvas(canvasId: string): Promise<any> {
+    return this.request('canvases.delete', { canvas_id: canvasId });
+  }
+
   // Check auth type
   get authType(): string {
     return this.config.auth_type;

@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Filter with `--contains <text>` and `--type <h1|h2|h3|any_header>`
 - `editCanvas` and `lookupCanvasSections` methods on SlackClient
   - Work with both standard and browser authentication
+- **Canvas Delete** (`canvas delete`): Permanently delete a canvas via the `canvases.delete` API
+  - Works with both standard and browser authentication
+  - Prompts for confirmation in an interactive terminal; `--yes` skips the prompt and is required when running non-interactively
+  - Supports `--json` output
+  - Adds `deleteCanvas` method to SlackClient and `confirmPrompt`/`parseConfirm` helpers
 
 ## [0.2.0] - 2026-01-30
 

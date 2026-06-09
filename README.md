@@ -269,11 +269,16 @@ slackcli canvas sections F1234567890 --contains "Action Items" --json
 slackcli canvas edit F1234567890 --operation insert_after --section "temp:C:abc123" --content "- follow up"
 slackcli canvas edit F1234567890 --operation replace --section "temp:C:abc123" --content "## Action Items (done)"
 slackcli canvas edit F1234567890 --operation delete --section "temp:C:abc123"
+
+# Delete a canvas (permanent — prompts for confirmation unless --yes)
+slackcli canvas delete F1234567890
+slackcli canvas delete F1234567890 --yes
+slackcli canvas delete F1234567890 --yes --json
 ```
 
 > **Token support for canvas commands**
 >
-> Due to Slack API limitations, **creating, editing, and section operations work only with Standard Slack tokens** (`xoxb`/`xoxp`) that carry the `canvases:write` scope. **Browser tokens (`xoxd`/`xoxc`) cannot create or edit canvases** — the canvas write API rejects browser session auth. Listing and reading canvases work with **both** token types.
+> Due to Slack API limitations, **creating, editing, deleting, and section operations work only with Standard Slack tokens** (`xoxb`/`xoxp`) that carry the `canvases:write` scope. **Browser tokens (`xoxd`/`xoxc`) cannot create, edit, or delete canvases** — the canvas write API rejects browser session auth. Listing and reading canvases work with **both** token types.
 >
 > | Command | Standard token (`xoxb`/`xoxp`) | Browser token (`xoxd`/`xoxc`) |
 > |---|:---:|:---:|
@@ -282,6 +287,7 @@ slackcli canvas edit F1234567890 --operation delete --section "temp:C:abc123"
 > | `canvas create` | ✅ (needs `canvases:write`) | ❌ |
 > | `canvas edit` | ✅ (needs `canvases:write`) | ❌ |
 > | `canvas sections` | ✅ (needs `canvases:read`) | ❌ |
+> | `canvas delete` | ✅ (needs `canvases:write`) | ❌ |
 >
 > Reading a canvas additionally requires the `files:read` scope on standard tokens.
 
@@ -299,6 +305,8 @@ slackcli canvas edit F1234567890 --operation delete --section "temp:C:abc123"
 Content for an edit comes from one of `--content`, `--file`, or `--stdin`. Use `slackcli canvas sections <canvas-id>` to discover the `--section` IDs that the targeted operations need (`--type` accepts `h1`, `h2`, `h3`, or `any_header`; with no filter it lists all headers).
 
 > **Section IDs are ephemeral.** Slack regenerates the `temp:` section IDs every time a canvas is edited. Always run `canvas sections` to fetch a fresh ID immediately before each section-targeted edit (`insert_after`, `insert_before`, `replace --section`, `delete`) — a stale ID from before another edit will fail with `section_not_found`.
+
+> **Warning:** `canvas delete` permanently removes the canvas. Once deleted, there is no way to recover it. In an interactive terminal you'll be asked to confirm; pass `--yes` to skip the prompt (required when running non-interactively). Requires the `canvases:write` scope.
 
 ### Update Commands
 
