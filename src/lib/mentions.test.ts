@@ -192,4 +192,36 @@ describe('resolveMentions', () => {
     expect(out).toBe('<!subteam^S1> and <!subteam^S1>');
     expect(client.usergroupsCalls).toBe(1);
   });
+
+  it('strips a trailing comma from @group: and keeps it as literal text', async () => {
+    const client = new FakeSlackClient({
+      usergroups: [{ id: 'S1', handle: 'ror_team', name: 'RoR Team' }],
+    });
+    expect(await resolveMentions('@group:ror_team, please review', client)).toBe(
+      '<!subteam^S1>, please review',
+    );
+  });
+
+  it('strips trailing sentence punctuation from @user:', async () => {
+    const client = new FakeSlackClient({
+      people: { paul: [{ id: 'U1', name: 'paul' }] },
+    });
+    expect(await resolveMentions('ping @user:paul.', client)).toBe('ping <@U1>.');
+  });
+
+  it('keeps an email intact but strips a trailing comma on @user:', async () => {
+    const client = new FakeSlackClient({
+      people: {
+        'paul@example.com': [{ id: 'U2', name: 'paul', profile: { email: 'paul@example.com' } }],
+      },
+    });
+    expect(await resolveMentions('@user:paul@example.com, hi', client)).toBe('<@U2>, hi');
+  });
+
+  it('resolves a @group token wrapped in parentheses', async () => {
+    const client = new FakeSlackClient({
+      usergroups: [{ id: 'S1', handle: 'ror_team' }],
+    });
+    expect(await resolveMentions('(@group:ror_team)', client)).toBe('(<!subteam^S1>)');
+  });
 });

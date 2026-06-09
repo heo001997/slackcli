@@ -42,7 +42,13 @@ function readArg(text: string, start: number): { value: string; end: number } {
 
   let j = start;
   while (j < text.length && !/\s/.test(text[j])) j++;
-  return { value: text.slice(start, j), end: j };
+  const raw = text.slice(start, j);
+  // Strip trailing sentence punctuation so "@group:ror_team," resolves the
+  // handle "ror_team" and leaves the comma as literal text. Handles and emails
+  // never end in these characters, so this is safe; mid-token '.', '-', '_'
+  // and '@' (emails) are preserved.
+  const value = raw.replace(/[.,;:!?)\]}'"]+$/, '');
+  return { value, end: j - (raw.length - value.length) };
 }
 
 // Read a channel name (letters, digits, hyphen, underscore) starting at `start`.
