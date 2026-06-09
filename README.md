@@ -17,7 +17,7 @@ A fast, developer-friendly command-line interface tool for interacting with Slac
 - 🏢 **Multi-Workspace Management**: Manage multiple Slack workspaces with ease
 - 💬 **Conversation Management**: List channels, read messages, send messages
 - 🎉 **Message Reactions**: Add emoji reactions to messages programmatically
-- 📄 **Canvas Support**: List, read, create, and edit Slack canvas documents as markdown
+- 📄 **Canvas Support**: List, read, create, edit, rename, and delete Slack canvas documents as markdown, plus per-section CRUD (`canvas section create/read/update/delete/list`)
 - 🚀 **Fast & Lightweight**: Built with Bun for blazing fast performance
 - 🔄 **Auto-Update**: Built-in self-update mechanism
 - 🎨 **Beautiful Output**: Colorful, user-friendly terminal output
@@ -301,6 +301,9 @@ slackcli canvas edit F1234567890 --operation insert_at_end --content "## Update"
 slackcli canvas edit F1234567890 --operation insert_at_start --file ./header.md
 cat new.md | slackcli canvas edit F1234567890 --operation replace --stdin
 
+# Rename a canvas (canvas-level — sets the document title, not a section)
+slackcli canvas edit F1234567890 --operation rename --content "New Title"
+
 # Look up section IDs, then target a section
 slackcli canvas sections F1234567890 --contains "Action Items" --json
 slackcli canvas edit F1234567890 --operation insert_after --section "temp:C:abc123" --content "- follow up"
@@ -324,6 +327,9 @@ slackcli canvas delete F1234567890 --yes --json
 > | `canvas create` | ✅ (needs `canvases:write`) | ❌ |
 > | `canvas edit` | ✅ (needs `canvases:write`) | ❌ |
 > | `canvas sections` | ✅ (needs `canvases:read`) | ❌ |
+> | `canvas section read` | ✅ | ✅ |
+> | `canvas section create` / `update` / `delete` | ✅ (needs `canvases:write`) | ❌ |
+> | `canvas section list` | ✅ (needs `canvases:read`) | ❌ |
 > | `canvas delete` | ✅ (needs `canvases:write`) | ❌ |
 >
 > Reading a canvas additionally requires the `files:read` scope on standard tokens.
@@ -338,12 +344,40 @@ slackcli canvas delete F1234567890 --yes --json
 | `insert_before` | content + `--section` | Insert before a section |
 | `replace` | content (+ optional `--section`) | Replace a section, or the whole canvas if no `--section` |
 | `delete` | `--section` | Delete a section |
+| `rename` | content | Set the canvas title (canvas-level; no `--section`) |
 
 Content for an edit comes from one of `--content`, `--file`, or `--stdin`. Use `slackcli canvas sections <canvas-id>` to discover the `--section` IDs that the targeted operations need (`--type` accepts `h1`, `h2`, `h3`, or `any_header`; with no filter it lists all headers).
 
 > **Section IDs are ephemeral.** Slack regenerates the `temp:` section IDs every time a canvas is edited. Always run `canvas sections` to fetch a fresh ID immediately before each section-targeted edit (`insert_after`, `insert_before`, `replace --section`, `delete`) — a stale ID from before another edit will fail with `section_not_found`.
 
 > **Warning:** `canvas delete` permanently removes the canvas. Once deleted, there is no way to recover it. In an interactive terminal you'll be asked to confirm; pass `--yes` to skip the prompt (required when running non-interactively). Requires the `canvases:write` scope.
+
+#### Canvas sections (CRUD)
+
+The `canvas section` group is an ergonomic wrapper over the section operations above — create, read, update, delete, and list sections without juggling `--operation` enums.
+
+```bash
+# Create a section at a position (exactly one of --at-start/--at-end/--after/--before)
+slackcli canvas section create F1234567890 --at-end --content $'# Gamma\nthird'
+slackcli canvas section create F1234567890 --after "temp:C:abc123" --file ./block.md
+
+# Read a single section by its heading text
+slackcli canvas section read F1234567890 --contains "Beta"
+slackcli canvas section read F1234567890 --contains "Beta" --json
+
+# Update (replace) a section by ID
+slackcli canvas section update F1234567890 "temp:C:abc123" --content $'# Beta\nUPDATED'
+
+# Delete a section by ID (prompts for confirmation unless --yes)
+slackcli canvas section delete F1234567890 "temp:C:abc123" --yes
+
+# List section IDs (same output as `canvas sections`)
+slackcli canvas section list F1234567890 --contains "Action Items"
+```
+
+> **`section read` slices markdown locally.** Slack has no per-section read API — `canvases.sections.lookup` returns section IDs only, with no content. So `section read` downloads the whole canvas, converts it to markdown, and returns the block under the heading matched by `--contains` (exact heading match first, then a unique substring match). The block ends at the next heading of the same or higher level. Use `--type h1|h2|h3` to restrict matching to one heading level and `--raw` to print the body without the heading line. No `canvases:write` scope is needed — like `canvas read`, it works with both standard and browser tokens.
+
+> **Renaming a canvas is canvas-level, not a section op.** To change the canvas title use `slackcli canvas edit <id> --operation rename --content "New Title"` — there is no `canvas section rename`.
 
 ### Update Commands
 

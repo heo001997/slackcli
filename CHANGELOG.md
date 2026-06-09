@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--section` targets a specific section; `--json` for machine-readable output
 - **Canvas Sections** (`canvas sections`): Look up section IDs via `canvases.sections.lookup`
   - Filter with `--contains <text>` and `--type <h1|h2|h3|any_header>`
+- **Canvas section CRUD** (`canvas section create/read/update/delete/list`): Ergonomic per-section wrappers over `canvases.edit` and the section lookup
+  - `create` inserts at `--at-start`, `--at-end`, `--after <id>`, or `--before <id>`
+  - `read --contains <heading>` slices the section out of the downloaded markdown (no per-section Slack API; matched by heading text, works with browser tokens)
+  - `update <section-id>` replaces a section; `delete <section-id>` removes one (prompts unless `--yes`)
+  - `list` is a CRUD-friendly alias of `canvas sections`
+- **`rename` operation** on `canvas edit`: Set the canvas title via `canvas edit <id> --operation rename --content "New Title"` (canvas-level; no `--section`)
 - `editCanvas` and `lookupCanvasSections` methods on SlackClient
   - Work with both standard and browser authentication
 - **Canvas Delete** (`canvas delete`): Permanently delete a canvas via the `canvases.delete` API
