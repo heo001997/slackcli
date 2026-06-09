@@ -9,6 +9,8 @@ import {
   buildEditChange,
   buildSectionCriteria,
   resolveMarkdown,
+  resolveCreatePosition,
+  extractSection,
   VALID_EDIT_OPERATIONS,
 } from './canvas.ts';
 
@@ -270,5 +272,114 @@ describe('canvas delete command', () => {
     const del = canvas.commands.find((command) => command.name() === 'delete');
 
     expect(del?.options.some((option) => option.long === '--json')).toBe(true);
+  });
+});
+
+describe('resolveCreatePosition', () => {
+  it('maps --at-start to insert_at_start', () => {
+    expect(resolveCreatePosition({ atStart: true })).toEqual({ operation: 'insert_at_start' });
+  });
+
+  it('maps --at-end to insert_at_end', () => {
+    expect(resolveCreatePosition({ atEnd: true })).toEqual({ operation: 'insert_at_end' });
+  });
+
+  it('maps --after to insert_after with the section id', () => {
+    expect(resolveCreatePosition({ after: 'temp:C:abc' })).toEqual({
+      operation: 'insert_after',
+      sectionId: 'temp:C:abc',
+    });
+  });
+
+  it('maps --before to insert_before with the section id', () => {
+    expect(resolveCreatePosition({ before: 'temp:C:xyz' })).toEqual({
+      operation: 'insert_before',
+      sectionId: 'temp:C:xyz',
+    });
+  });
+
+  it('throws when no position flag is given', () => {
+    expect(() => resolveCreatePosition({})).toThrow(/Specify one position/);
+  });
+
+  it('throws when more than one position flag is given', () => {
+    expect(() => resolveCreatePosition({ atStart: true, atEnd: true })).toThrow(/only one of/);
+  });
+});
+
+describe('extractSection', () => {
+  it('matches a heading exactly (case-insensitive) and returns its body', () => {
+    const md = '# Notes\nfirst line\n# Notes Extra\nignored';
+    const section = extractSection(md, 'notes');
+    expect(section.heading).toBe('Notes');
+    expect(section.level).toBe(1);
+    expect(section.body).toBe('first line');
+  });
+
+  it('matches by substring when there is no exact heading', () => {
+    const md = '# Action Items\ndo the thing\n# Other\nelse';
+    const section = extractSection(md, 'Action');
+    expect(section.heading).toBe('Action Items');
+    expect(section.body).toBe('do the thing');
+  });
+
+  it('includes nested subsections and stops at the next same-or-higher heading', () => {
+    const md = '# Alpha\nintro\n## Sub\nsubbody\n# Beta\nlast';
+    const section = extractSection(md, 'Alpha');
+    expect(section.level).toBe(1);
+    expect(section.body).toBe('intro\n## Sub\nsubbody');
+  });
+
+  it('stops a deeper heading at the next higher-level heading', () => {
+    const md = '# Alpha\nintro\n## Sub\nsubbody\n# Beta\nlast';
+    const section = extractSection(md, 'Sub');
+    expect(section.level).toBe(2);
+    expect(section.body).toBe('subbody');
+  });
+
+  it('throws and lists available headings when nothing matches', () => {
+    expect(() => extractSection('# Alpha\nx\n# Beta\ny', 'Zeta')).toThrow(/No section heading matches/);
+    expect(() => extractSection('# Alpha\nx\n# Beta\ny', 'Zeta')).toThrow(/"Alpha".*"Beta"/);
+  });
+
+  it('throws when a substring matches more than one heading', () => {
+    expect(() => extractSection('# Foo One\na\n# Foo Two\nb', 'Foo')).toThrow(/matches 2 headings/);
+  });
+});
+
+describe('canvas section command group', () => {
+  it('registers the section group with create/read/update/delete/list', () => {
+    const canvas = createCanvasCommand();
+    const section = canvas.commands.find((c) => c.name() === 'section');
+    expect(section).toBeDefined();
+    const names = section!.commands.map((c) => c.name());
+    expect(names).toEqual(expect.arrayContaining(['create', 'read', 'update', 'delete', 'list']));
+  });
+
+  it('keeps the back-compat "sections" lookup command registered', () => {
+    const canvas = createCanvasCommand();
+    expect(canvas.commands.some((c) => c.name() === 'sections')).toBe(true);
+  });
+
+  it('exposes --after on section create', () => {
+    const canvas = createCanvasCommand();
+    const section = canvas.commands.find((c) => c.name() === 'section');
+    const create = section!.commands.find((c) => c.name() === 'create');
+    expect(create?.options.some((o) => o.long === '--after')).toBe(true);
+    expect(create?.options.some((o) => o.long === '--at-end')).toBe(true);
+  });
+
+  it('exposes --contains on section read', () => {
+    const canvas = createCanvasCommand();
+    const section = canvas.commands.find((c) => c.name() === 'section');
+    const read = section!.commands.find((c) => c.name() === 'read');
+    expect(read?.options.some((o) => o.long === '--contains')).toBe(true);
+  });
+
+  it('exposes --yes on section delete', () => {
+    const canvas = createCanvasCommand();
+    const section = canvas.commands.find((c) => c.name() === 'section');
+    const del = section!.commands.find((c) => c.name() === 'delete');
+    expect(del?.options.some((o) => o.long === '--yes')).toBe(true);
   });
 });
