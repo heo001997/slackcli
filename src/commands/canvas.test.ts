@@ -169,7 +169,7 @@ describe('buildEditChange', () => {
     expect(() => buildEditChange('delete', undefined, undefined)).toThrow(/requires --section/);
   });
 
-  it('lists exactly six valid operations', () => {
+  it('lists exactly seven valid operations including rename', () => {
     expect(VALID_EDIT_OPERATIONS).toEqual([
       'insert_at_start',
       'insert_at_end',
@@ -177,7 +177,26 @@ describe('buildEditChange', () => {
       'insert_before',
       'replace',
       'delete',
+      'rename',
     ]);
+  });
+
+  it('builds rename with title_content and no section', () => {
+    const change = buildEditChange('rename', 'New Title', undefined);
+    expect(change).toEqual({
+      operation: 'rename',
+      title_content: { type: 'markdown', markdown: 'New Title' },
+    });
+    expect(change.document_content).toBeUndefined();
+    expect(change.section_id).toBeUndefined();
+  });
+
+  it('throws when rename has no content', () => {
+    expect(() => buildEditChange('rename', undefined, undefined)).toThrow(/requires content/);
+  });
+
+  it('throws when rename is given a section', () => {
+    expect(() => buildEditChange('rename', 'New Title', 'temp:C:abc')).toThrow(/does not accept --section/);
   });
 });
 

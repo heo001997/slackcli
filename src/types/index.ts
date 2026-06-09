@@ -264,11 +264,14 @@ export type CanvasEditOperation =
   | 'insert_after'
   | 'insert_before'
   | 'replace'
-  | 'delete';
+  | 'delete'
+  | 'rename';
 
 export interface CanvasChange {
   operation: CanvasEditOperation;
   document_content?: CanvasDocumentContent;
+  // Canvas-level title for the `rename` operation only.
+  title_content?: CanvasDocumentContent;
   section_id?: string;
 }
 
@@ -295,6 +298,45 @@ export interface CanvasSectionsOptions {
 }
 
 export interface CanvasDeleteOptions {
+  yes?: boolean;
+  json?: boolean;
+  workspace?: string;
+}
+
+// `canvas section create` — exactly one position flag plus one content source.
+export interface CanvasSectionCreateOptions {
+  atStart?: boolean;
+  atEnd?: boolean;
+  after?: string;
+  before?: string;
+  content?: string;
+  file?: string;
+  stdin?: boolean;
+  json?: boolean;
+  workspace?: string;
+}
+
+// `canvas section read` — pick a section by heading text and slice it out.
+export interface CanvasSectionReadOptions {
+  contains?: string;
+  type?: 'h1' | 'h2' | 'h3' | 'any_header';
+  channel?: string;
+  raw?: boolean;
+  json?: boolean;
+  workspace?: string;
+}
+
+// `canvas section update` — replace a section by id with new content.
+export interface CanvasSectionUpdateOptions {
+  content?: string;
+  file?: string;
+  stdin?: boolean;
+  json?: boolean;
+  workspace?: string;
+}
+
+// `canvas section delete` — remove a section by id.
+export interface CanvasSectionDeleteOptions {
   yes?: boolean;
   json?: boolean;
   workspace?: string;

@@ -79,6 +79,7 @@ export const VALID_EDIT_OPERATIONS: CanvasEditOperation[] = [
   'insert_before',
   'replace',
   'delete',
+  'rename',
 ];
 
 export const VALID_SECTION_TYPES = ['h1', 'h2', 'h3', 'any_header'] as const;
@@ -111,7 +112,7 @@ export function buildEditChange(
 ): CanvasChange {
   const needsContent = operation !== 'delete';
   const needsSection = operation === 'insert_after' || operation === 'insert_before' || operation === 'delete';
-  const forbidsSection = operation === 'insert_at_start' || operation === 'insert_at_end';
+  const forbidsSection = operation === 'insert_at_start' || operation === 'insert_at_end' || operation === 'rename';
 
   if (needsContent && !markdown) {
     throw new Error(`Operation "${operation}" requires content (--content, --file, or --stdin)`);
@@ -127,7 +128,13 @@ export function buildEditChange(
   }
 
   const change: CanvasChange = { operation };
-  if (needsContent && markdown) change.document_content = { type: 'markdown', markdown };
+  // `rename` is canvas-level: the markdown becomes the new title, carried in
+  // title_content rather than document_content.
+  if (operation === 'rename') {
+    change.title_content = { type: 'markdown', markdown: markdown as string };
+  } else if (needsContent && markdown) {
+    change.document_content = { type: 'markdown', markdown };
+  }
   if (sectionId) change.section_id = sectionId;
   return change;
 }
@@ -423,9 +430,9 @@ export function createCanvasCommand(): Command {
   // Edit canvas content
   canvas
     .command('edit')
-    .description('Edit an existing canvas')
+    .description('Edit an existing canvas (use --operation rename with --content to set the canvas title)')
     .argument('<canvas-id>', 'Canvas file ID (e.g., F1234567890)')
-    .option('--operation <op>', 'Edit operation: insert_at_start, insert_at_end, insert_after, insert_before, replace, delete')
+    .option('--operation <op>', 'Edit operation: insert_at_start, insert_at_end, insert_after, insert_before, replace, delete, rename')
     .option('--content <markdown>', 'Canvas content as markdown')
     .option('--file <path>', 'Read canvas markdown from a file')
     .option('--stdin', 'Read canvas markdown from stdin', false)
