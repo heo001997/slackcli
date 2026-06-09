@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional `--title` and `--channel` (channel required on free teams)
   - `--json` output includes the new `canvas_id`
   - Requires the `canvases:write` scope (standard tokens) or browser auth
+- **Canvas Edit** (`canvas edit`): Update an existing canvas via `canvases.edit`
+  - Six operations: `insert_at_start`, `insert_at_end`, `insert_after`, `insert_before`, `replace`, `delete`
+  - Content sourced from `--content`, `--file`, or `--stdin` (markdown)
+  - `--section` targets a specific section; `--json` for machine-readable output
+- **Canvas Sections** (`canvas sections`): Look up section IDs via `canvases.sections.lookup`
+  - Filter with `--contains <text>` and `--type <h1|h2|h3|any_header>`
+- `editCanvas` and `lookupCanvasSections` methods on SlackClient
+  - Work with both standard and browser authentication
 
 ## [0.2.0] - 2026-01-30
 
