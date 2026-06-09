@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-09
+
 ### Added
 - **Canvas create** (`canvas create`): Create a new canvas via `canvases.create`
   - Content from inline `--content`, a `--file`, or `--stdin`
