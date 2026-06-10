@@ -16,4 +16,12 @@ describe('messages command', () => {
     expect(draft?.options.some((option) => option.long === '--message')).toBe(true);
     expect(draft?.options.some((option) => option.long === '--recipient-id')).toBe(true);
   });
+
+  it('exposes a drafts delete command taking a draft-id argument', () => {
+    const messages = createMessagesCommand();
+    const drafts = messages.commands.find((c) => c.name() === 'drafts');
+    const del = drafts?.commands.find((c) => c.name() === 'delete');
+    expect(del).toBeDefined();
+    expect(del?.options.some((o) => o.long === '--keep-files')).toBe(true);
+  });
 });

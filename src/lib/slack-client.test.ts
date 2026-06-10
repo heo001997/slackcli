@@ -145,3 +145,27 @@ describe('SlackClient.deleteCanvas', () => {
     ]);
   });
 });
+
+describe('SlackClient.deleteDraft', () => {
+  it('calls drafts.delete with the client clock and skip_file_deletion=false by default', async () => {
+    const client = new CapturingSlackClient();
+    await client.deleteDraft('Dr0B9F9HD2RL');
+    expect(client.calls).toHaveLength(1);
+    const { method, params } = client.calls[0];
+    expect(method).toBe('drafts.delete');
+    expect(params.draft_id).toBe('Dr0B9F9HD2RL');
+    expect(params.skip_file_deletion).toBe('false');
+    expect(params.client_last_updated_ts).toMatch(/^\d+\.\d+$/);
+  });
+
+  it('honors an explicit clientLastUpdatedTs and skip_file_deletion=true when keepFiles is set', async () => {
+    const client = new CapturingSlackClient();
+    await client.deleteDraft('Dr0B9F9HD2RL', { clientLastUpdatedTs: '999.000', skipFileDeletion: true });
+    expect(client.calls).toEqual([
+      {
+        method: 'drafts.delete',
+        params: { draft_id: 'Dr0B9F9HD2RL', client_last_updated_ts: '999.000', skip_file_deletion: 'true' },
+      },
+    ]);
+  });
+});

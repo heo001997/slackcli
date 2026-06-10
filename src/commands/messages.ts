@@ -119,5 +119,41 @@ export function createMessagesCommand(): Command {
       }
     });
 
+  // Manage draft messages
+  const DRAFT_ID_PATTERN = /^Dr[A-Za-z0-9]+$/;
+
+  const drafts = new Command('drafts').description('Manage draft messages');
+  drafts
+    .command('delete')
+    .description('Delete a draft message by its draft ID (e.g. Dr0B9F9HD2RL). Requires Browser Session Tokens.')
+    .argument('<draft-id>', 'Draft ID to delete (starts with Dr)')
+    .option('--keep-files', 'Keep files attached to the draft (skip_file_deletion)', false)
+    .option('--workspace <id|name>', 'Workspace to use')
+    .option('--json', 'Output in JSON format', false)
+    .action(async (draftId, options) => {
+      if (!DRAFT_ID_PATTERN.test(draftId)) {
+        error('Invalid draft ID', 'Draft ID must start with "Dr" (e.g. Dr0B9F9HD2RL).');
+        process.exit(1);
+      }
+
+      const spinner = ora('Deleting draft...').start();
+      try {
+        const client = await getAuthenticatedClient(options.workspace);
+        await client.deleteDraft(draftId, { skipFileDeletion: options.keepFiles });
+        spinner.succeed(`Deleted draft ${draftId}`);
+
+        if (options.json) {
+          console.log(JSON.stringify({ ok: true, draft_id: draftId }, null, 2));
+          return;
+        }
+        success(`Draft ${draftId} has been deleted.`);
+      } catch (err: any) {
+        spinner.fail('Failed to delete draft');
+        error(err.message);
+        process.exit(1);
+      }
+    });
+  messages.addCommand(drafts);
+
   return messages;
 }

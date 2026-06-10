@@ -207,6 +207,9 @@ slackcli messages send --recipient-id=C1234567890 --message="Here is the file" -
 # Create a draft message in a channel (only works with browser session tokens)
 slackcli messages draft --recipient-id=C1234567890 --message="Hello team!"
 
+# Delete a draft by its draft ID (only works with browser session tokens)
+slackcli messages drafts delete Dr0B9F9HD2RL
+
 # Add emoji reaction to a message
 slackcli messages react --channel-id=C1234567890 --timestamp=1234567890.123456 --emoji=+1
 

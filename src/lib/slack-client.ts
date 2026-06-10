@@ -226,6 +226,29 @@ export class SlackClient {
     return this.request('drafts.create', params);
   }
 
+  // Delete a draft message
+  async deleteDraft(draftId: string, options: {
+    skipFileDeletion?: boolean;
+    clientLastUpdatedTs?: string;
+  } = {}): Promise<any> {
+    if (this.config.auth_type === 'standard') {
+      throw new Error('Draft deletion requires browser authentication');
+    }
+
+    // drafts.delete uses client_last_updated_ts for optimistic-concurrency: the
+    // server returns draft_has_conflict if its stored stamp is newer than ours,
+    // so send the client's current clock unless the caller pins a specific stamp.
+    const clientLastUpdatedTs = options.clientLastUpdatedTs ?? (Date.now() / 1000).toFixed(6);
+
+    const params: Record<string, any> = {
+      draft_id: draftId,
+      client_last_updated_ts: clientLastUpdatedTs,
+      skip_file_deletion: options.skipFileDeletion ? 'true' : 'false',
+    };
+
+    return this.request('drafts.delete', params);
+  }
+
   // Get user info
   async getUserInfo(userId: string): Promise<any> {
     return this.request('users.info', { user: userId });
