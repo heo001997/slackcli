@@ -55,9 +55,19 @@ interface RichTextSection {
   elements: RichTextElement[];
 }
 
+interface RichTextList {
+  type: 'rich_text_list';
+  style: 'bullet' | 'ordered';
+  indent: number;
+  border: number;
+  elements: RichTextSection[];
+}
+
+type RichTextBlockElement = RichTextSection | RichTextList;
+
 interface RichTextBlock {
   type: 'rich_text';
-  elements: RichTextSection[];
+  elements: RichTextBlockElement[];
 }
 
 // Markers and their corresponding style keys
@@ -208,17 +218,87 @@ function parseInline(text: string): RichTextElement[] {
   });
 }
 
-export function parseMrkdwn(text: string): RichTextBlock[] {
-  // Keep newlines embedded in text elements rather than splitting into multiple sections.
-  // Slack's draft composer renders multiple rich_text_section elements inline (no line breaks),
-  // but correctly preserves \n characters within a single text element.
-  const elements = parseInline(text);
+// Bullet (`- `/`* `) and ordered (`1. `/`1) `) list lines. Capture group 1 is the
+// leading whitespace (used to derive nesting indent), group 2 the item content.
+const BULLET_LINE = /^(\s*)[-*]\s+(.*)$/;
+const ORDERED_LINE = /^(\s*)\d+[.)]\s+(.*)$/;
 
-  return [{
-    type: 'rich_text',
-    elements: [{
-      type: 'rich_text_section',
-      elements: elements.length > 0 ? elements : [{ type: 'text', text: '' }],
-    }],
-  }];
+// Two leading spaces (or a tab) = one indent level.
+function indentLevel(leading: string): number {
+  return Math.floor(leading.replace(/\t/g, '  ').length / 2);
+}
+
+function toSection(content: string): RichTextSection {
+  const els = parseInline(content);
+  return {
+    type: 'rich_text_section',
+    elements: els.length > 0 ? els : [{ type: 'text', text: '' }],
+  };
+}
+
+export function parseMrkdwn(text: string): RichTextBlock[] {
+  // A rich_text block's `elements` is a sequence of `rich_text_section` (prose) and
+  // `rich_text_list` (native bullet/numbered lists). Consecutive `- `/`* ` lines become
+  // one bullet list; `1.`/`1)` lines become one ordered list; a change of style or indent
+  // starts a new list block. Runs of non-list lines collapse into a single section with
+  // their newlines embedded — Slack renders that inline, matching the prior behaviour and
+  // keeping plain multi-line messages unchanged.
+  const lines = text.split('\n');
+  const blockElements: RichTextBlockElement[] = [];
+
+  let plainBuffer: string[] = [];
+  let listStyle: 'bullet' | 'ordered' | null = null;
+  let listIndent = 0;
+  let listItems: RichTextSection[] = [];
+
+  const flushPlain = (): void => {
+    if (plainBuffer.length === 0) return;
+    blockElements.push(toSection(plainBuffer.join('\n')));
+    plainBuffer = [];
+  };
+
+  const flushList = (): void => {
+    if (listStyle === null) return;
+    blockElements.push({
+      type: 'rich_text_list',
+      style: listStyle,
+      indent: listIndent,
+      border: 0,
+      elements: listItems,
+    });
+    listStyle = null;
+    listIndent = 0;
+    listItems = [];
+  };
+
+  for (const line of lines) {
+    const bullet = BULLET_LINE.exec(line);
+    const ordered = bullet ? null : ORDERED_LINE.exec(line);
+    const match = bullet ?? ordered;
+
+    if (match) {
+      const style: 'bullet' | 'ordered' = bullet ? 'bullet' : 'ordered';
+      const indent = indentLevel(match[1]);
+
+      flushPlain();
+      if (listStyle !== null && (listStyle !== style || listIndent !== indent)) {
+        flushList();
+      }
+      listStyle = style;
+      listIndent = indent;
+      listItems.push(toSection(match[2]));
+    } else {
+      flushList();
+      plainBuffer.push(line);
+    }
+  }
+
+  flushPlain();
+  flushList();
+
+  if (blockElements.length === 0) {
+    blockElements.push({ type: 'rich_text_section', elements: [{ type: 'text', text: '' }] });
+  }
+
+  return [{ type: 'rich_text', elements: blockElements }];
 }

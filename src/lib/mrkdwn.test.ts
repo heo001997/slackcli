@@ -138,6 +138,88 @@ describe('parseMrkdwn', () => {
   });
 });
 
+describe('parseMrkdwn lists', () => {
+  function blockElements(text: string) {
+    return parseMrkdwn(text)[0].elements;
+  }
+
+  it('turns `- ` lines into a bullet list', () => {
+    expect(blockElements('- one\n- two')).toEqual([{
+      type: 'rich_text_list',
+      style: 'bullet',
+      indent: 0,
+      border: 0,
+      elements: [
+        { type: 'rich_text_section', elements: [{ type: 'text', text: 'one' }] },
+        { type: 'rich_text_section', elements: [{ type: 'text', text: 'two' }] },
+      ],
+    }]);
+  });
+
+  it('treats `* ` the same as `- `', () => {
+    const a = parseMrkdwn('* a')[0].elements[0];
+    expect((a as any).type).toBe('rich_text_list');
+    expect((a as any).style).toBe('bullet');
+  });
+
+  it('turns `1. ` lines into an ordered list', () => {
+    expect(blockElements('1. first\n2. second')).toEqual([{
+      type: 'rich_text_list',
+      style: 'ordered',
+      indent: 0,
+      border: 0,
+      elements: [
+        { type: 'rich_text_section', elements: [{ type: 'text', text: 'first' }] },
+        { type: 'rich_text_section', elements: [{ type: 'text', text: 'second' }] },
+      ],
+    }]);
+  });
+
+  it('accepts `1) ` ordered syntax', () => {
+    const block = parseMrkdwn('1) a\n2) b')[0].elements[0];
+    expect((block as any).type).toBe('rich_text_list');
+    expect((block as any).style).toBe('ordered');
+    expect((block as any).elements).toHaveLength(2);
+  });
+
+  it('starts a new list block when style switches bullet -> ordered', () => {
+    const els = blockElements('- a\n1. b');
+    expect(els).toHaveLength(2);
+    expect((els[0] as any).style).toBe('bullet');
+    expect((els[1] as any).style).toBe('ordered');
+  });
+
+  it('derives indent from leading spaces (2 spaces = 1 level)', () => {
+    const els = blockElements('- top\n  - nested');
+    expect(els).toHaveLength(2);
+    expect((els[0] as any).indent).toBe(0);
+    expect((els[1] as any).indent).toBe(1);
+  });
+
+  it('parses inline formatting and links inside list items', () => {
+    const list = parseMrkdwn('- [2702] <https://trello.com/c/EOi1iwLA|Backdated *Consume*>')[0].elements[0] as any;
+    expect(list.type).toBe('rich_text_list');
+    expect(list.elements[0].elements).toEqual([
+      { type: 'text', text: '[2702] ' },
+      { type: 'link', url: 'https://trello.com/c/EOi1iwLA', text: 'Backdated *Consume*' },
+    ]);
+  });
+
+  it('interleaves prose sections and lists (daily report shape)', () => {
+    const els = blockElements('Yesterday:\n- a\n- b\n\nToday:\n- c');
+    expect(els.map((e: any) => e.type)).toEqual([
+      'rich_text_section',
+      'rich_text_list',
+      'rich_text_section',
+      'rich_text_list',
+    ]);
+    expect((els[0] as any).elements).toEqual([{ type: 'text', text: 'Yesterday:' }]);
+    expect((els[1] as any).elements).toHaveLength(2);
+    expect((els[2] as any).elements).toEqual([{ type: 'text', text: '\nToday:' }]);
+    expect((els[3] as any).elements).toHaveLength(1);
+  });
+});
+
 describe('parseMrkdwn — mentions, links and broadcasts', () => {
   it('parses a user mention', () => {
     expect(elements('<@U123>')).toEqual([
