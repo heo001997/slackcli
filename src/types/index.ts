@@ -5,7 +5,36 @@ export type TokenType = 'bot' | 'user';
 export type ConversationType = 'public_channel' | 'private_channel' | 'mpim' | 'im';
 
 // Workspace configuration interfaces
-export interface StandardAuthConfig {
+//
+// One workspace can hold BOTH a standard token (xoxp/xoxb) and browser tokens
+// (xoxc/xoxd) at once. Each Slack method routes to the credential that accepts
+// it (see METHOD_AUTH in slack-client.ts), so an image-bearing canvas — which
+// needs browser-only upload AND standard-only canvas writes — works in one run.
+export interface StandardCredential {
+  token: string;
+  token_type: TokenType;
+}
+
+export interface BrowserCredential {
+  xoxc_token: string;
+  xoxd_token: string;
+}
+
+export interface WorkspaceConfig {
+  workspace_id: string;
+  workspace_name: string;
+  workspace_url?: string;        // required for any browser request
+  standard?: StandardCredential;
+  browser?: BrowserCredential;
+  default_auth?: AuthType;       // tie-break for 'any'-class methods
+}
+
+// Which credential a Slack method accepts. 'any' methods work with either.
+export type AuthClass = 'standard_only' | 'browser_only' | 'any';
+
+// Legacy on-disk shapes (one credential per workspace, tagged by auth_type).
+// Migrated to the unified shape on read, never written again.
+export interface LegacyStandardConfig {
   workspace_id: string;
   workspace_name: string;
   auth_type: 'standard';
@@ -13,7 +42,7 @@ export interface StandardAuthConfig {
   token_type: TokenType;
 }
 
-export interface BrowserAuthConfig {
+export interface LegacyBrowserConfig {
   workspace_id: string;
   workspace_name: string;
   workspace_url: string;
@@ -21,8 +50,6 @@ export interface BrowserAuthConfig {
   xoxd_token: string;
   xoxc_token: string;
 }
-
-export type WorkspaceConfig = StandardAuthConfig | BrowserAuthConfig;
 
 export interface WorkspacesData {
   default_workspace?: string;

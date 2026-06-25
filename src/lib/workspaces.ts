@@ -1,7 +1,12 @@
 import { mkdir, readFile, writeFile, exists } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { WorkspacesData, WorkspaceConfig } from '../types/index.ts';
+import type {
+  WorkspacesData,
+  WorkspaceConfig,
+  StandardCredential,
+  BrowserCredential,
+} from '../types/index.ts';
 
 const CONFIG_DIR = join(homedir(), '.config', 'slackcli');
 const WORKSPACES_FILE = join(CONFIG_DIR, 'workspaces.json');
@@ -13,7 +18,37 @@ async function ensureConfigDir(): Promise<void> {
   }
 }
 
-// Load workspaces data
+// Migrate a single workspace from a legacy (auth_type-tagged, one-credential)
+// shape to the unified shape with nested standard/browser creds. A workspace
+// without auth_type is already migrated and passed through unchanged.
+// Exported for unit testing (pure — no filesystem access).
+export function migrateWorkspace(raw: any): WorkspaceConfig {
+  if (!raw || typeof raw !== 'object' || !('auth_type' in raw)) {
+    return raw as WorkspaceConfig;
+  }
+
+  const base = {
+    workspace_id: raw.workspace_id,
+    workspace_name: raw.workspace_name,
+  };
+
+  if (raw.auth_type === 'browser') {
+    return {
+      ...base,
+      workspace_url: raw.workspace_url,
+      browser: { xoxc_token: raw.xoxc_token, xoxd_token: raw.xoxd_token },
+      default_auth: 'browser',
+    };
+  }
+
+  return {
+    ...base,
+    standard: { token: raw.token, token_type: raw.token_type },
+    default_auth: 'standard',
+  };
+}
+
+// Load workspaces data, migrating any legacy entries on read.
 export async function loadWorkspaces(): Promise<WorkspacesData> {
   await ensureConfigDir();
 
@@ -22,8 +57,15 @@ export async function loadWorkspaces(): Promise<WorkspacesData> {
   }
 
   try {
-    const data = await readFile(WORKSPACES_FILE, 'utf-8');
-    return JSON.parse(data);
+    const raw = await readFile(WORKSPACES_FILE, 'utf-8');
+    const parsed = JSON.parse(raw) as { default_workspace?: string; workspaces?: Record<string, any> };
+
+    const workspaces: Record<string, WorkspaceConfig> = {};
+    for (const [id, ws] of Object.entries(parsed.workspaces || {})) {
+      workspaces[id] = migrateWorkspace(ws);
+    }
+
+    return { default_workspace: parsed.default_workspace, workspaces };
   } catch (error) {
     console.error('Error loading workspaces:', error);
     return { workspaces: {} };
@@ -36,15 +78,73 @@ export async function saveWorkspaces(data: WorkspacesData): Promise<void> {
   await writeFile(WORKSPACES_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
-// Add or update a workspace
-export async function addWorkspace(config: WorkspaceConfig): Promise<void> {
+// Merge one credential into a workspace WITHOUT dropping the other. Used by the
+// login path so a second login (e.g. adding a standard token to a workspace that
+// already has browser tokens) augments rather than clobbers. Preserves name and
+// workspace_url, and seeds default_auth from the first credential added.
+export async function mergeCredential(
+  workspaceId: string,
+  patch: {
+    workspace_name?: string;
+    workspace_url?: string;
+    standard?: StandardCredential;
+    browser?: BrowserCredential;
+  },
+): Promise<WorkspaceConfig> {
   const data = await loadWorkspaces();
+  const existing = data.workspaces[workspaceId];
 
-  data.workspaces[config.workspace_id] = config;
+  const merged: WorkspaceConfig = {
+    workspace_id: workspaceId,
+    workspace_name: patch.workspace_name || existing?.workspace_name || workspaceId,
+    workspace_url: patch.workspace_url ?? existing?.workspace_url,
+    standard: patch.standard ?? existing?.standard,
+    browser: patch.browser ?? existing?.browser,
+    default_auth: existing?.default_auth ?? (patch.standard ? 'standard' : 'browser'),
+  };
 
-  // Set as default if it's the first workspace
+  data.workspaces[workspaceId] = merged;
+
   if (!data.default_workspace) {
-    data.default_workspace = config.workspace_id;
+    data.default_workspace = workspaceId;
+  }
+
+  await saveWorkspaces(data);
+  return merged;
+}
+
+// Remove a single credential from a workspace, keeping the other. If no
+// credential remains, the whole workspace is dropped (and the default realigned).
+export async function removeCredential(
+  workspaceId: string,
+  cred: 'standard' | 'browser',
+): Promise<void> {
+  const data = await loadWorkspaces();
+  const workspace = data.workspaces[workspaceId];
+
+  if (!workspace) {
+    throw new Error(`Workspace ${workspaceId} not found`);
+  }
+
+  if (cred === 'standard') {
+    delete workspace.standard;
+  } else {
+    delete workspace.browser;
+    delete workspace.workspace_url;
+  }
+
+  // Realign default_auth to a surviving credential.
+  if (workspace.default_auth === cred) {
+    workspace.default_auth = workspace.standard ? 'standard' : workspace.browser ? 'browser' : undefined;
+  }
+
+  // No credentials left → drop the workspace entirely.
+  if (!workspace.standard && !workspace.browser) {
+    delete data.workspaces[workspaceId];
+    if (data.default_workspace === workspaceId) {
+      const remainingIds = Object.keys(data.workspaces);
+      data.default_workspace = remainingIds.length > 0 ? remainingIds[0] : undefined;
+    }
   }
 
   await saveWorkspaces(data);

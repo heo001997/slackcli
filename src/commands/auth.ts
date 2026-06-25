@@ -5,10 +5,11 @@ import {
   getAllWorkspaces,
   setDefaultWorkspace,
   removeWorkspace,
+  removeCredential,
   clearAllWorkspaces,
   getDefaultWorkspaceId,
 } from '../lib/workspaces.ts';
-import { success, error, info, formatWorkspace } from '../lib/formatter.ts';
+import { success, error, info, formatWorkspace, formatAuthSummary } from '../lib/formatter.ts';
 import chalk from 'chalk';
 import { parseCurlCommand, CurlParseError, looksLikeCurlCommand } from '../lib/curl-parser.ts';
 import { readClipboard } from '../lib/clipboard.ts';
@@ -36,9 +37,7 @@ export function createAuthCommand(): Command {
         spinner.succeed('Authentication successful!');
         success(`Authenticated as workspace: ${config.workspace_name}`);
         info(`Workspace ID: ${config.workspace_id}`);
-        if (config.auth_type === 'standard') {
-          info(`Token Type: ${config.token_type}`);
-        }
+        info(`Credentials: ${formatAuthSummary(config)}`);
       } catch (err: any) {
         spinner.fail('Authentication failed');
         error(err.message);
@@ -68,7 +67,8 @@ export function createAuthCommand(): Command {
         spinner.succeed('Authentication successful!');
         success(`Authenticated as workspace: ${config.workspace_name}`);
         info(`Workspace ID: ${config.workspace_id}`);
-        if (config.auth_type === 'browser') {
+        info(`Credentials: ${formatAuthSummary(config)}`);
+        if (config.workspace_url) {
           info(`Workspace URL: ${config.workspace_url}`);
         }
       } catch (err: any) {
@@ -120,13 +120,24 @@ export function createAuthCommand(): Command {
       }
     });
 
-  // Remove workspace
+  // Remove workspace (or one credential with --cred)
   auth
     .command('remove')
-    .description('Remove a workspace')
+    .description('Remove a workspace, or just one credential with --cred')
     .argument('<workspace-id>', 'Workspace ID to remove')
-    .action(async (workspaceId) => {
+    .option('--cred <type>', 'Remove only one credential: standard or browser')
+    .action(async (workspaceId, options) => {
       try {
+        if (options.cred) {
+          if (options.cred !== 'standard' && options.cred !== 'browser') {
+            error('Invalid --cred', 'Use --cred standard or --cred browser');
+            process.exit(1);
+          }
+          await removeCredential(workspaceId, options.cred);
+          success(`Removed ${options.cred} credential from workspace ${workspaceId}`);
+          return;
+        }
+
         await removeWorkspace(workspaceId);
         success(`Removed workspace ${workspaceId}`);
       } catch (err: any) {

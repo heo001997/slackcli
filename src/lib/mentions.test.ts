@@ -17,10 +17,9 @@ class FakeSlackClient extends SlackClient {
     super({
       workspace_id: 'T123',
       workspace_name: 'Test Workspace',
-      auth_type: 'browser',
-      xoxd_token: 'xoxd-test',
-      xoxc_token: 'xoxc-test',
       workspace_url: 'https://example.slack.com',
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
     });
   }
 

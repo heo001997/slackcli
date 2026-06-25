@@ -1,13 +1,34 @@
 import { WebClient } from '@slack/web-api';
 import { basename } from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
-import type { WorkspaceConfig, SlackAuthTestResponse, CanvasChange, CanvasSectionCriteria } from '../types/index.ts';
+import type { WorkspaceConfig, AuthClass, SlackAuthTestResponse, CanvasChange, CanvasSectionCriteria } from '../types/index.ts';
 import { parseMrkdwn } from './mrkdwn.ts';
 
 interface ExternalUploadUrlResponse {
   upload_url?: string;
   file_id?: string;
 }
+
+// Which credential each Slack method accepts. Methods not listed work with
+// either credential ('any'). Verified by live probing on T037LUW4MMM:
+//  - canvases.* reject browser tokens (not_allowed_token_type) → standard_only
+//  - files upload + drafts + the web-client-only endpoints reject xoxp
+//    (missing_scope / not allowed) → browser_only
+const METHOD_AUTH: Record<string, AuthClass> = {
+  'canvases.create': 'standard_only',
+  'canvases.edit': 'standard_only',
+  'canvases.delete': 'standard_only',
+  'canvases.sections.lookup': 'standard_only',
+  'conversations.canvases.create': 'standard_only',
+  'files.getUploadURLExternal': 'browser_only',
+  'files.completeUploadExternal': 'browser_only',
+  'drafts.create': 'browser_only',
+  'drafts.delete': 'browser_only',
+  'saved.list': 'browser_only',
+  'client.counts': 'browser_only',
+  'search.modules': 'browser_only',
+  'messages.list': 'browser_only',
+};
 
 export class SlackClient {
   private config: WorkspaceConfig;
@@ -16,19 +37,53 @@ export class SlackClient {
   constructor(config: WorkspaceConfig) {
     this.config = config;
 
-    // Only use WebClient for standard auth
-    if (config.auth_type === 'standard') {
-      this.webClient = new WebClient(config.token);
+    // The @slack/web-api WebClient backs every standard-token request.
+    if (config.standard) {
+      this.webClient = new WebClient(config.standard.token);
     }
   }
 
-  // Make API request (handles both auth types)
+  // Route a Slack method to the credential that accepts it. standard_only /
+  // browser_only methods throw an actionable error when their credential is
+  // absent; 'any' methods prefer default_auth, falling back to whichever
+  // credential exists.
   async request(method: string, params: Record<string, any> = {}): Promise<any> {
-    if (this.config.auth_type === 'standard') {
+    const authClass: AuthClass = METHOD_AUTH[method] ?? 'any';
+
+    if (authClass === 'standard_only') {
+      if (!this.config.standard) {
+        throw new Error(
+          `"${method}" requires a standard token (xoxp/xoxb). Add one with: ` +
+          `slackcli auth login --token=<xoxp…> --workspace-name="${this.config.workspace_name}"`,
+        );
+      }
       return this.standardRequest(method, params);
-    } else {
+    }
+
+    if (authClass === 'browser_only') {
+      if (!this.config.browser) {
+        throw new Error(
+          `"${method}" requires browser auth (xoxc/xoxd). Add it with: ` +
+          `slackcli auth login-browser --xoxc=… --xoxd=… --workspace-url=…`,
+        );
+      }
       return this.browserRequest(method, params);
     }
+
+    // 'any': prefer default_auth, else standard, else browser.
+    const useStandard =
+      this.config.default_auth === 'browser' ? !this.config.browser : !!this.config.standard;
+
+    if (useStandard && this.config.standard) {
+      return this.standardRequest(method, params);
+    }
+    if (this.config.browser) {
+      return this.browserRequest(method, params);
+    }
+    if (this.config.standard) {
+      return this.standardRequest(method, params);
+    }
+    throw new Error(`No credentials configured for workspace "${this.config.workspace_name}".`);
   }
 
   // Standard token request (using @slack/web-api)
@@ -47,20 +102,20 @@ export class SlackClient {
 
   // Browser token request (custom implementation)
   private async browserRequest(method: string, params: Record<string, any>): Promise<any> {
-    if (this.config.auth_type !== 'browser') {
-      throw new Error('Invalid auth type');
+    if (!this.config.browser || !this.config.workspace_url) {
+      throw new Error('Browser auth not configured (missing xoxc/xoxd tokens or workspace_url)');
     }
 
     const url = `${this.config.workspace_url}/api/${method}`;
 
     const formBody = new URLSearchParams({
-      token: this.config.xoxc_token,
+      token: this.config.browser.xoxc_token,
       ...params,
     });
 
     try {
       // URL-encode the xoxd token for the cookie
-      const encodedXoxdToken = encodeURIComponent(this.config.xoxd_token);
+      const encodedXoxdToken = encodeURIComponent(this.config.browser.xoxd_token);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -80,6 +135,16 @@ export class SlackClient {
       const data: any = await response.json();
 
       if (!data.ok) {
+        // Surface a stale/revoked browser session as an actionable re-login hint
+        // rather than an opaque "invalid_auth" — xoxc rotates and xoxd can be
+        // revoked, so this is the common "I already provided the token" failure.
+        if (['invalid_auth', 'not_authed', 'token_expired', 'token_revoked'].includes(data.error)) {
+          throw new Error(
+            `Slack rejected the browser session (${data.error}) — the xoxc/xoxd tokens ` +
+            `have expired or been revoked. Refresh them with: ` +
+            `slackcli auth login-browser --xoxc=… --xoxd=… --workspace-url=…`,
+          );
+        }
         throw new Error(data.error || 'Unknown API error');
       }
 
@@ -151,10 +216,14 @@ export class SlackClient {
     return this.request('chat.postMessage', params);
   }
 
-  async uploadFileExternal(channel: string, filePath: string, options: {
+  // Upload a local file via Slack's external-upload flow (browser-only). When
+  // `channel` is omitted the file stays private — it never posts to a channel —
+  // but still gets a usable permalink, which is exactly what the canvas
+  // converter needs. Returns the new file_id and its permalink.
+  async uploadFileExternal(channel: string | undefined, filePath: string, options: {
     initial_comment?: string;
     thread_ts?: string;
-  } = {}): Promise<unknown> {
+  } = {}): Promise<{ file_id: string; permalink?: string }> {
     const fileStats = await stat(filePath).catch((error: unknown) => {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
         throw new Error(`File not found: ${filePath}`);
@@ -193,19 +262,24 @@ export class SlackClient {
 
     const params: Record<string, string> = {
       files: JSON.stringify([{ id: uploadUrlResponse.file_id, title: filename }]),
-      channel_id: channel,
     };
+    if (channel) params.channel_id = channel;
     if (options.initial_comment) params.initial_comment = options.initial_comment;
     if (options.thread_ts) params.thread_ts = options.thread_ts;
 
-    return this.request('files.completeUploadExternal', params);
+    await this.request('files.completeUploadExternal', params);
+
+    // Resolve the permalink so callers (e.g. the canvas converter) can link to
+    // the file without re-querying.
+    const fileInfo = await this.getFileInfo(uploadUrlResponse.file_id);
+    return { file_id: uploadUrlResponse.file_id, permalink: fileInfo.file?.permalink };
   }
 
   // Create draft message
   async createDraft(channelId: string, text: string, options: {
     thread_ts?: string;
   } = {}): Promise<any> {
-    if (this.config.auth_type === 'standard') {
+    if (!this.config.browser) {
       throw new Error('Draft creation requires browser authentication');
     }
 
@@ -231,7 +305,7 @@ export class SlackClient {
     skipFileDeletion?: boolean;
     clientLastUpdatedTs?: string;
   } = {}): Promise<any> {
-    if (this.config.auth_type === 'standard') {
+    if (!this.config.browser) {
       throw new Error('Draft deletion requires browser authentication');
     }
 
@@ -305,7 +379,7 @@ export class SlackClient {
     if (options.count) params.count = options.count;
     if (options.cursor) params.cursor = options.cursor;
 
-    if (this.config.auth_type === 'browser') {
+    if (this.config.browser) {
       return this.request('saved.list', params);
     }
     return this.request('stars.list', params);
@@ -340,7 +414,7 @@ export class SlackClient {
     count?: number;
     cursor?: string;
   } = {}): Promise<any> {
-    if (this.config.auth_type === 'browser') {
+    if (this.config.browser) {
       const params: Record<string, any> = {
         query,
         module,
@@ -392,7 +466,7 @@ export class SlackClient {
 
   // Get unread counts (browser: client.counts, standard: conversations.list with unread data)
   async getUnreadCounts(): Promise<any> {
-    if (this.config.auth_type === 'browser') {
+    if (this.config.browser) {
       return this.request('client.counts', {});
     }
     return this.listConversations({
@@ -433,23 +507,46 @@ export class SlackClient {
     });
   }
 
-  // Download file content with auth, size guard, and auth page detection
-  async downloadFile(url: string, maxBytes: number = 10 * 1024 * 1024): Promise<string> {
+  // Fetch raw file bytes from a Slack url_private with the right auth, a redirect
+  // guard, and a streaming size cap. Backs both downloadFile (text) and
+  // downloadFileBytes (binary).
+  //
+  // Auth: files.slack.com / url_private authenticate via the browser session
+  // cookie (d=xoxd). A standard bearer token does NOT work for these URLs —
+  // Slack 302-redirects it to the login page exactly like an unauthenticated
+  // request — so prefer the browser cookie whenever it exists and only fall back
+  // to the bearer token when no browser credential is configured.
+  private async fetchFileBytes(
+    url: string,
+    maxBytes: number,
+  ): Promise<{ bytes: Uint8Array; contentType: string }> {
     const headers: Record<string, string> = {};
 
-    if (this.config.auth_type === 'standard') {
-      headers['Authorization'] = `Bearer ${this.config.token}`;
-    } else if (this.config.auth_type === 'browser') {
-      const encodedXoxdToken = encodeURIComponent(this.config.xoxd_token);
-      headers['Cookie'] = `d=${encodedXoxdToken}`;
+    if (this.config.browser) {
+      headers['Cookie'] = `d=${encodeURIComponent(this.config.browser.xoxd_token)}`;
       headers['Origin'] = 'https://app.slack.com';
+    } else if (this.config.standard) {
+      headers['Authorization'] = `Bearer ${this.config.standard.token}`;
     }
 
-    const response = await fetch(url, { headers });
+    // redirect: 'manual' so a login redirect surfaces as a 3xx we can report,
+    // instead of silently following through to a 200 sign-in page that would be
+    // saved as if it were the file.
+    const response = await fetch(url, { headers, redirect: 'manual' });
+
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error(
+        'Slack redirected the download to a login page — the browser session is ' +
+        'missing, expired, or not authorized for this file. Refresh it with: ' +
+        'slackcli auth login-browser --xoxc=… --xoxd=… --workspace-url=…',
+      );
+    }
 
     if (!response.ok) {
       throw new Error(`Download failed: HTTP ${response.status}`);
     }
+
+    const contentType = response.headers.get('content-type') || '';
 
     // Early exit when Content-Length is known and exceeds limit
     const contentLength = response.headers.get('content-length');
@@ -461,7 +558,7 @@ export class SlackClient {
     // Stream-based size guard (handles chunked transfer / missing Content-Length)
     const reader = response.body?.getReader();
     if (!reader) {
-      return '';
+      return { bytes: new Uint8Array(0), contentType };
     }
 
     const chunks: Uint8Array[] = [];
@@ -485,7 +582,22 @@ export class SlackClient {
       offset += chunk.byteLength;
     }
 
-    return new TextDecoder().decode(merged);
+    return { bytes: merged, contentType };
+  }
+
+  // Download text file content (e.g. canvas HTML) with auth + size guard.
+  async downloadFile(url: string, maxBytes: number = 10 * 1024 * 1024): Promise<string> {
+    const { bytes } = await this.fetchFileBytes(url, maxBytes);
+    return new TextDecoder().decode(bytes);
+  }
+
+  // Download raw file bytes (binary-safe) — used by `files download`. Returns the
+  // bytes alongside the server's content-type so callers can pick an extension.
+  async downloadFileBytes(
+    url: string,
+    maxBytes: number = 50 * 1024 * 1024,
+  ): Promise<{ bytes: Uint8Array; contentType: string }> {
+    return this.fetchFileBytes(url, maxBytes);
   }
 
   // Get canvas file ID associated with a channel or DM
@@ -527,8 +639,11 @@ export class SlackClient {
     return this.request('canvases.delete', { canvas_id: canvasId });
   }
 
-  // Check auth type
+  // Effective auth type, browser-preferred. Callers (message.ts, unread.ts)
+  // use this to anticipate which API path request() takes for 'any'-class
+  // methods so they parse the matching response shape. Browser-preferred
+  // because messages.list / client.counts return richer browser-only payloads.
   get authType(): string {
-    return this.config.auth_type;
+    return this.config.browser ? 'browser' : 'standard';
   }
 }

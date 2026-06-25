@@ -19,14 +19,21 @@ export function formatTimestamp(ts: string): string {
   });
 }
 
+// Summarize which credentials a workspace holds (it can hold both).
+export function formatAuthSummary(config: WorkspaceConfig): string {
+  const parts: string[] = [];
+  if (config.standard) parts.push('🔑 Standard');
+  if (config.browser) parts.push('🌐 Browser');
+  return parts.length > 0 ? parts.join(' + ') : '⚠️ None';
+}
+
 // Format workspace info
 export function formatWorkspace(config: WorkspaceConfig, isDefault: boolean = false): string {
   const defaultBadge = isDefault ? chalk.green('(default)') : '';
-  const authType = config.auth_type === 'browser' ? '🌐 Browser' : '🔑 Standard';
 
   return `${chalk.bold(config.workspace_name)} ${defaultBadge}
   ID: ${config.workspace_id}
-  Auth: ${authType}`;
+  Auth: ${formatAuthSummary(config)}`;
 }
 
 // Format channel list

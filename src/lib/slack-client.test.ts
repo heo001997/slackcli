@@ -11,10 +11,9 @@ class TestSlackClient extends SlackClient {
     super({
       workspace_id: 'T123',
       workspace_name: 'Test Workspace',
-      auth_type: 'browser',
-      xoxd_token: 'xoxd-test',
-      xoxc_token: 'xoxc-test',
       workspace_url: 'https://example.slack.com',
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
     });
   }
 
@@ -33,6 +32,13 @@ class TestSlackClient extends SlackClient {
       return {
         ok: true,
         files: [{ id: 'F123' }],
+      };
+    }
+
+    if (method === 'files.info') {
+      return {
+        ok: true,
+        file: { id: 'F123', permalink: 'https://example.slack.com/files/F123' },
       };
     }
 
@@ -70,7 +76,7 @@ describe('SlackClient.uploadFileExternal', () => {
     try {
       const client = new TestSlackClient();
 
-      await client.uploadFileExternal('C123', filePath, {
+      const result = await client.uploadFileExternal('C123', filePath, {
         initial_comment: 'Here is the file',
       });
 
@@ -90,11 +96,49 @@ describe('SlackClient.uploadFileExternal', () => {
             initial_comment: 'Here is the file',
           },
         },
+        {
+          method: 'files.info',
+          params: { file: 'F123' },
+        },
       ]);
+      expect(result).toEqual({
+        file_id: 'F123',
+        permalink: 'https://example.slack.com/files/F123',
+      });
       expect(uploadRequest).toEqual({
         url: 'https://uploads.slack.test/file',
         bodyText: 'Quarterly report',
         contentType: 'application/octet-stream',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('omits channel_id when no channel is given (private upload) and returns the permalink', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'slackcli-upload-'));
+    const filePath = join(dir, 'shot.png');
+    await Bun.write(filePath, 'binary-ish');
+
+    globalThis.fetch = (async (_input, _init) => new Response('', { status: 200 })) as typeof fetch;
+
+    try {
+      const client = new TestSlackClient();
+
+      const result = await client.uploadFileExternal(undefined, filePath, {});
+
+      // No channel_id in the completeUploadExternal params → file stays private.
+      expect(client.calls).toEqual([
+        { method: 'files.getUploadURLExternal', params: { filename: 'shot.png', length: 10 } },
+        {
+          method: 'files.completeUploadExternal',
+          params: { files: JSON.stringify([{ id: 'F123', title: 'shot.png' }]) },
+        },
+        { method: 'files.info', params: { file: 'F123' } },
+      ]);
+      expect(result).toEqual({
+        file_id: 'F123',
+        permalink: 'https://example.slack.com/files/F123',
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -114,6 +158,48 @@ describe('SlackClient.uploadFileExternal', () => {
   });
 });
 
+describe('SlackClient capability routing', () => {
+  it('throws an actionable error when a standard-only method has no standard cred', async () => {
+    const client = new SlackClient({
+      workspace_id: 'T123',
+      workspace_name: 'Test Workspace',
+      workspace_url: 'https://example.slack.com',
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
+    });
+
+    await expect(client.request('canvases.create', {})).rejects.toThrow(
+      /requires a standard token/,
+    );
+  });
+
+  it('throws an actionable error when a browser-only method has no browser cred', async () => {
+    const client = new SlackClient({
+      workspace_id: 'T123',
+      workspace_name: 'Test Workspace',
+      standard: { token: 'xoxp-test', token_type: 'user' },
+      default_auth: 'standard',
+    });
+
+    await expect(client.request('drafts.create', {})).rejects.toThrow(
+      /requires browser auth/,
+    );
+  });
+
+  it('reports browser as the effective auth type when both creds are present', () => {
+    const client = new SlackClient({
+      workspace_id: 'T123',
+      workspace_name: 'Test Workspace',
+      workspace_url: 'https://example.slack.com',
+      standard: { token: 'xoxp-test', token_type: 'user' },
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'standard',
+    });
+
+    expect(client.authType).toBe('browser');
+  });
+});
+
 class CapturingSlackClient extends SlackClient {
   public readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
 
@@ -121,10 +207,9 @@ class CapturingSlackClient extends SlackClient {
     super({
       workspace_id: 'T123',
       workspace_name: 'Test Workspace',
-      auth_type: 'browser',
-      xoxd_token: 'xoxd-test',
-      xoxc_token: 'xoxc-test',
       workspace_url: 'https://example.slack.com',
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
     });
   }
 
@@ -167,5 +252,71 @@ describe('SlackClient.deleteDraft', () => {
         params: { draft_id: 'Dr0B9F9HD2RL', client_last_updated_ts: '999.000', skip_file_deletion: 'true' },
       },
     ]);
+  });
+});
+
+describe('SlackClient.downloadFileBytes', () => {
+  it('authenticates with the browser cookie, not the bearer token, even when a standard token exists', async () => {
+    // Slack's url_private 302-redirects bearer tokens to the login page, so the
+    // browser cookie must win whenever it is present.
+    const client = new SlackClient({
+      workspace_id: 'T123',
+      workspace_name: 'Test Workspace',
+      workspace_url: 'https://example.slack.com',
+      standard: { token: 'xoxp-test', token_type: 'user' },
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
+    });
+
+    let sentHeaders: Record<string, string> = {};
+    globalThis.fetch = (async (_input, init) => {
+      sentHeaders = (init?.headers as Record<string, string>) ?? {};
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+    }) as typeof fetch;
+
+    const { bytes, contentType } = await client.downloadFileBytes('https://files.slack.com/files-pri/T123-F1/a.png');
+
+    expect(sentHeaders['Cookie']).toBe('d=xoxd-test');
+    expect(sentHeaders['Authorization']).toBeUndefined();
+    expect(contentType).toBe('image/png');
+    expect(Array.from(bytes)).toEqual([1, 2, 3]);
+  });
+
+  it('throws an actionable login-redirect error when Slack 302s the download', async () => {
+    const client = new SlackClient({
+      workspace_id: 'T123',
+      workspace_name: 'Test Workspace',
+      workspace_url: 'https://example.slack.com',
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
+    });
+
+    globalThis.fetch = (async (_input, _init) =>
+      new Response('', { status: 302, headers: { location: 'https://example.slack.com/?redir=x' } })) as typeof fetch;
+
+    await expect(
+      client.downloadFileBytes('https://files.slack.com/files-pri/T123-F1/a.png'),
+    ).rejects.toThrow(/login page/);
+  });
+});
+
+describe('SlackClient browser auth errors', () => {
+  it('maps invalid_auth to an actionable re-login hint', async () => {
+    const client = new SlackClient({
+      workspace_id: 'T123',
+      workspace_name: 'Test Workspace',
+      workspace_url: 'https://example.slack.com',
+      browser: { xoxc_token: 'xoxc-test', xoxd_token: 'xoxd-test' },
+      default_auth: 'browser',
+    });
+
+    globalThis.fetch = (async (_input, _init) =>
+      new Response(JSON.stringify({ ok: false, error: 'invalid_auth' }), { status: 200 })) as typeof fetch;
+
+    // saved.list is a browser-only method, so it routes through browserRequest.
+    await expect(client.request('saved.list', {})).rejects.toThrow(/browser session/);
   });
 });

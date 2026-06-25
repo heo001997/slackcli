@@ -1,79 +1,67 @@
 import { SlackClient } from './slack-client.ts';
-import { addWorkspace, getWorkspace } from './workspaces.ts';
-import type { StandardAuthConfig, BrowserAuthConfig, WorkspaceConfig } from '../types/index.ts';
+import { mergeCredential, getWorkspace } from './workspaces.ts';
+import type { WorkspaceConfig, StandardCredential, BrowserCredential } from '../types/index.ts';
 import { extractSlackWorkspaceName } from './curl-parser.ts';
 
-// Authenticate with standard token
+// Authenticate with a standard token, then merge it into the workspace (keeping
+// any browser credential already stored there).
 export async function authenticateStandard(
   token: string,
   workspaceName: string
 ): Promise<WorkspaceConfig> {
-  // Create a temporary config to test the token
-  const tempConfig: StandardAuthConfig = {
-    workspace_id: 'temp',
-    workspace_name: workspaceName,
-    auth_type: 'standard',
+  const standard: StandardCredential = {
     token,
     token_type: token.startsWith('xoxb-') ? 'bot' : 'user',
   };
 
-  const client = new SlackClient(tempConfig);
+  // Temporary config so auth.test runs against the new token before we save it.
+  const client = new SlackClient({
+    workspace_id: 'temp',
+    workspace_name: workspaceName,
+    standard,
+    default_auth: 'standard',
+  });
 
   try {
     const authTest = await client.testAuth();
 
-    // Update with real workspace info
-    const config: StandardAuthConfig = {
-      ...tempConfig,
-      workspace_id: authTest.team_id,
+    return await mergeCredential(authTest.team_id, {
       workspace_name: workspaceName || authTest.team,
-    };
-
-    // Save the workspace
-    await addWorkspace(config);
-
-    return config;
+      standard,
+    });
   } catch (error: any) {
     throw new Error(`Authentication failed: ${error.message}`);
   }
 }
 
-// Authenticate with browser tokens
+// Authenticate with browser tokens, then merge them into the workspace (keeping
+// any standard credential already stored there).
 export async function authenticateBrowser(
   xoxdToken: string,
   xoxcToken: string,
   workspaceUrl: string,
   workspaceName?: string
 ): Promise<WorkspaceConfig> {
-  // Extract workspace name from URL if not provided
   const defaultName = extractSlackWorkspaceName(workspaceUrl);
+  const browser: BrowserCredential = { xoxc_token: xoxcToken, xoxd_token: xoxdToken };
 
-  // Create a temporary config to test the tokens
-  const tempConfig: BrowserAuthConfig = {
+  // Temporary config so auth.test runs against the new tokens before we save them.
+  const client = new SlackClient({
     workspace_id: 'temp',
     workspace_name: workspaceName || defaultName,
     workspace_url: workspaceUrl,
-    auth_type: 'browser',
-    xoxd_token: xoxdToken,
-    xoxc_token: xoxcToken,
-  };
-
-  const client = new SlackClient(tempConfig);
+    browser,
+    default_auth: 'browser',
+  });
 
   try {
     const authTest = await client.testAuth();
 
-    // Update with real workspace info
-    const config: BrowserAuthConfig = {
-      ...tempConfig,
-      workspace_id: authTest.team_id,
+    return await mergeCredential(authTest.team_id, {
       workspace_name: workspaceName || authTest.team,
-    };
-
-    // Save the workspace
-    await addWorkspace(config);
-
-    return config;
+      workspace_url: workspaceUrl,
+      browser,
+    });
   } catch (error: any) {
     throw new Error(`Authentication failed: ${error.message}`);
   }
