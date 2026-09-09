@@ -98,17 +98,40 @@ export interface SlackFile {
   url_private?: string;
   url_private_download?: string;
   permalink?: string;
+  permalink_public?: string;
   mode?: string;
+  // Text content of the file. Slack populates these for emailed files, posts
+  // and snippets, and they are frequently the ONLY human-readable content of
+  // the message — a `subtype: file_share` post carries an empty top-level
+  // `text`, so without these an integration sees just a filename.
+  plain_text?: string;
+  preview?: string;
+  preview_plain_text?: string;
+  // Email metadata, present when a message arrives via Slack's email bridge.
+  subject?: string;
+  from?: Array<Record<string, unknown>>;
+  to?: Array<Record<string, unknown>>;
+  cc?: Array<Record<string, unknown>>;
+  pretty_type?: string;
+  created?: number;
+  timestamp?: number;
+  user?: string;
+  username?: string;
 }
 
 export interface SlackMessage {
   type: string;
+  subtype?: string;
   user?: string;
+  username?: string;
   bot_id?: string;
+  app_id?: string;
+  team?: string;
   text: string;
   ts: string;
   thread_ts?: string;
   reply_count?: number;
+  edited?: Record<string, unknown>;
   reactions?: Array<{
     name: string;
     count: number;

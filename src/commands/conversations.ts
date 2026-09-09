@@ -4,6 +4,7 @@ import ora from 'ora';
 import { getAuthenticatedClient } from '../lib/auth.ts';
 import { error, formatChannelList, formatConversationHistory, formatUnreadChannels } from '../lib/formatter.ts';
 import { fetchMessage } from '../lib/message.ts';
+import { serializeMessage } from '../lib/message-serializer.ts';
 import { fetchUnreadChannels } from '../lib/unread.ts';
 import type { SlackChannel, SlackMessage, SlackUser } from '../types/index.ts';
 
@@ -144,29 +145,7 @@ export function createConversationsCommand(): Command {
           console.log(JSON.stringify({
             channel_id: channelId,
             message_count: messages.length,
-            messages: messages.map(msg => ({
-              ts: msg.ts,
-              thread_ts: msg.thread_ts,
-              user: msg.user,
-              text: msg.text,
-              type: msg.type,
-              reply_count: msg.reply_count,
-              reactions: msg.reactions,
-              bot_id: msg.bot_id,
-              blocks: msg.blocks,
-              attachments: msg.attachments,
-              ...(msg.files?.length ? { files: msg.files.map(f => ({
-                id: f.id,
-                name: f.name,
-                title: f.title,
-                mimetype: f.mimetype,
-                filetype: f.filetype,
-                size: f.size,
-                url_private: f.url_private,
-                permalink: f.permalink,
-                mode: f.mode,
-              })) } : {}),
-            })),
+            messages: messages.map(serializeMessage),
             users: Array.from(users.values()).map(u => ({
               id: u.id,
               name: u.name,
@@ -224,28 +203,7 @@ export function createConversationsCommand(): Command {
         if (options.json) {
           console.log(JSON.stringify({
             channel_id: channelId,
-            message: {
-              ts: msg.ts,
-              thread_ts: msg.thread_ts,
-              user: msg.user,
-              text: msg.text,
-              type: msg.type,
-              reply_count: msg.reply_count,
-              reactions: msg.reactions,
-              bot_id: msg.bot_id,
-              blocks: msg.blocks,
-              ...(msg.files?.length ? { files: msg.files.map(f => ({
-                id: f.id,
-                name: f.name,
-                title: f.title,
-                mimetype: f.mimetype,
-                filetype: f.filetype,
-                size: f.size,
-                url_private: f.url_private,
-                permalink: f.permalink,
-                mode: f.mode,
-              })) } : {}),
-            },
+            message: serializeMessage(msg),
             users: Array.from(users.values()).map(u => ({
               id: u.id,
               name: u.name,
